@@ -22,19 +22,19 @@
         "isActive": <#if account.status == "ACTIVE">true<#else>false</#if>
         }<#if account?has_next>,</#if>
     </#list>
-],
-"totalBalance": {
-"amount": <#assign total = 0><#list accounts as account><#assign total = total + account.balance></#list>${total?c},
-"currency": "USD"
-},
-"notifications": {
-"channels": [
-<#if preferences.emailNotifications>"EMAIL"</#if><#if preferences.emailNotifications && preferences.smsNotifications>, </#if><#if preferences.smsNotifications>"SMS"</#if>
-],
-"locale": "${preferences.preferredLanguage!'en-US'}"
-},
-"metadata": {
-"transformedAt": "${.now?iso_utc}",
-"accountCount": ${accounts?size}
-}
+    ],
+    "totalBalance": {
+        "amount": <#assign total = 0><#list accounts as account><#assign total = total + account.balance></#list>${total?c},
+        "currency": "USD"
+    },
+    "notifications": {
+        "channels": [
+            <#if preferences.emailNotifications>"EMAIL"</#if><#if preferences.emailNotifications && preferences.smsNotifications>, </#if><#if preferences.smsNotifications>"SMS"</#if>
+        ],
+        "locale": "${preferences.preferredLanguage!'en-US'}"
+    },
+    "metadata": {
+        "transformedAt": "${.now?iso_utc}",
+        "accountCount": ${accounts?size}
+    }
 }
