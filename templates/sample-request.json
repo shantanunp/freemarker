@@ -1,0 +1,38 @@
+{
+  "customerId": "CUST-12345",
+  "personalInfo": {
+    "firstName": "John",
+    "lastName": "Doe",
+    "dateOfBirth": "1985-06-15",
+    "email": "john.doe@example.com",
+    "phoneNumber": "+1-555-123-4567"
+  },
+  "accounts": [
+    {
+      "accountNumber": "ACC-001",
+      "accountType": "savings",
+      "balance": 15000.50,
+      "currency": "USD",
+      "status": "ACTIVE"
+    },
+    {
+      "accountNumber": "ACC-002",
+      "accountType": "checking",
+      "balance": 3250.75,
+      "currency": "USD",
+      "status": "ACTIVE"
+    },
+    {
+      "accountNumber": "ACC-003",
+      "accountType": "investment",
+      "balance": 50000.00,
+      "currency": "USD",
+      "status": "INACTIVE"
+    }
+  ],
+  "preferences": {
+    "emailNotifications": true,
+    "smsNotifications": true,
+    "preferredLanguage": "en-US"
+  }
+}
