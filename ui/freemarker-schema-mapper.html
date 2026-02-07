@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeMarker Schema Mapping Editor</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .mapping-row {
+            transition: all 0.2s ease;
+        }
+        .mapping-row:hover {
+            background-color: #f8fafc;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        .field-item {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .field-item:hover {
+            background-color: #e0f2fe;
+            transform: translateX(4px);
+        }
+        .dropzone {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.2s;
+        }
+        .dropzone:hover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Sample schemas for demo
+        const sampleInputSchema = {
+            "customer": {
+                "id": "string",
+                "firstName": "string",
+                "lastName": "string",
+                "email": "string",
+                "phoneNumber": "string",
+                "dateOfBirth": "date",
+                "address": {
+                    "street": "string",
+                    "city": "string",
+                    "state": "string",
+                    "zipCode": "string",
+                    "country": "string"
+                },
+                "accountType": "string",
+                "status": "string",
+                "createdDate": "datetime",
+                "lastModifiedDate": "datetime"
+            }
+        };
+
+        const sampleOutputSchema = {
+            "customerId": "string",
+            "fullName": "string",
+            "contactEmail": "string",
+            "phone": "string",
+            "mailingAddress": {
+                "street": "string",
+                "city": "string",
+                "state": "string",
+                "zip": "string"
+            },
+            "accountType": "string",
+            "accountStatus": "string",
+            "registrationDate": "datetime"
+        };
+
+        const sampleTemplate = `{
+  "customerId": "\${customer.id}",
+  "fullName": "\${customer.firstName} \${customer.lastName}",
+  "contactEmail": "\${customer.email}",
+  "phone": "\${customer.phoneNumber}",
+  "mailingAddress": {
+    "street": "\${customer.address.street}",
+    "city": "\${customer.address.city}",
+    "state": "\${customer.address.state}",
+    "zip": "\${customer.address.zipCode}"
+  },
+  "accountType": "\${customer.accountType}",
+  "accountStatus": "\${customer.status}",
+  "registrationDate": "\${customer.createdDate}"
+}`;
+
+        function SchemaMapper() {
+            const [step, setStep] = useState(1);
+            const [inputSchema, setInputSchema] = useState(null);
+            const [outputSchema, setOutputSchema] = useState(null);
+            const [templateContent, setTemplateContent] = useState('');
+            const [inputFields, setInputFields] = useState([]);
+            const [outputFields, setOutputFields] = useState([]);
+            const [mappings, setMappings] = useState([]);
+            const [originalMappings, setOriginalMappings] = useState([]);
+            const [schemaFormat, setSchemaFormat] = useState({ input: 'json', output: 'json' });
+
+            // Parse JSON schema and extract all fields with paths
+            const extractFieldsFromJSON = (obj, prefix = '') => {
+                const fields = [];
+                
+                const traverse = (current, path) => {
+                    if (current === null || current === undefined) return;
+                    
+                    if (typeof current === 'object' && !Array.isArray(current)) {
+                        Object.keys(current).forEach(key => {
+                            const newPath = path ? `${path}.${key}` : key;
+                            const value = current[key];
+                            
+                            if (typeof value === 'object' && !Array.isArray(value) && 
+                                !['string', 'number', 'boolean', 'date', 'datetime'].includes(value)) {
+                                // Nested object
+                                fields.push({
+                                    path: newPath,
+                                    type: 'object',
+                                    isNested: true
+                                });
+                                traverse(value, newPath);
+                            } else {
+                                // Leaf field
+                                fields.push({
+                                    path: newPath,
+                                    type: typeof value === 'string' ? value : typeof value,
+                                    isNested: path.includes('.')
+                                });
+                            }
+                        });
+                    }
+                };
+                
+                traverse(obj, prefix);
+                return fields;
+            };
+
+            // Parse XML and convert to JSON-like structure
+            const parseXML = (xmlString) => {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+                
+                const xmlToJson = (node) => {
+                    const obj = {};
+                    
+                    if (node.attributes && node.attributes.length > 0) {
+                        for (let i = 0; i < node.attributes.length; i++) {
+                            const attr = node.attributes[i];
+                            obj[`@${attr.name}`] = attr.value;
+                        }
+                    }
+                    
+                    if (node.childNodes && node.childNodes.length > 0) {
+                        for (let i = 0; i < node.childNodes.length; i++) {
+                            const child = node.childNodes[i];
+                            
+                            if (child.nodeType === 3) { // Text node
+                                const text = child.nodeValue.trim();
+                                if (text) return text;
+                            } else if (child.nodeType === 1) { // Element node
+                                const childName = child.nodeName;
+                                const childValue = xmlToJson(child);
+                                
+                                if (obj[childName]) {
+                                    if (!Array.isArray(obj[childName])) {
+                                        obj[childName] = [obj[childName]];
+                                    }
+                                    obj[childName].push(childValue);
+                                } else {
+                                    obj[childName] = childValue;
+                                }
+                            }
+                        }
+                    }
+                    
+                    return obj;
+                };
+                
+                return xmlToJson(xmlDoc.documentElement);
+            };
+
+            // Parse FreeMarker template
+            const parseTemplate = (content) => {
+                const mappingList = [];
+                const regex = /"([^"]+)":\s*"([^"]*\$\{[^}]+\}[^"]*)"/g;
+                let match;
+
+                while ((match = regex.exec(content)) !== null) {
+                    const targetField = match[1];
+                    const fullValue = match[2];
+                    
+                    // Extract all ${...} expressions
+                    const sourceRegex = /\$\{([^}]+)\}/g;
+                    const sources = [];
+                    let sourceMatch;
+                    
+                    while ((sourceMatch = sourceRegex.exec(fullValue)) !== null) {
+                        sources.push(sourceMatch[1]);
+                    }
+                    
+                    if (sources.length > 0) {
+                        mappingList.push({
+                            id: Date.now() + Math.random(),
+                            target: targetField,
+                            source: sources.length === 1 ? sources[0] : sources.join(' + '),
+                            sources: sources,
+                            transformation: sources.length > 1 ? 'concatenate' : 'direct',
+                            condition: '',
+                            description: '',
+                            isNew: false
+                        });
+                    }
+                }
+
+                setMappings([...mappingList]);
+                setOriginalMappings(JSON.parse(JSON.stringify(mappingList)));
+            };
+
+            // Handle file uploads
+            const handleFileUpload = (type, file) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const content = event.target.result;
+                    
+                    try {
+                        if (type === 'input-schema') {
+                            if (file.name.endsWith('.json')) {
+                                const json = JSON.parse(content);
+                                setInputSchema(json);
+                                setInputFields(extractFieldsFromJSON(json));
+                                setSchemaFormat(prev => ({ ...prev, input: 'json' }));
+                            } else if (file.name.endsWith('.xml')) {
+                                const json = parseXML(content);
+                                setInputSchema(json);
+                                setInputFields(extractFieldsFromJSON(json));
+                                setSchemaFormat(prev => ({ ...prev, input: 'xml' }));
+                            }
+                        } else if (type === 'output-schema') {
+                            if (file.name.endsWith('.json')) {
+                                const json = JSON.parse(content);
+                                setOutputSchema(json);
+                                setOutputFields(extractFieldsFromJSON(json));
+                                setSchemaFormat(prev => ({ ...prev, output: 'json' }));
+                            } else if (file.name.endsWith('.xml')) {
+                                const json = parseXML(content);
+                                setOutputSchema(json);
+                                setOutputFields(extractFieldsFromJSON(json));
+                                setSchemaFormat(prev => ({ ...prev, output: 'xml' }));
+                            }
+                        } else if (type === 'template') {
+                            setTemplateContent(content);
+                            parseTemplate(content);
+                        }
+                    } catch (error) {
+                        alert(`Error parsing ${type}: ${error.message}`);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            const handleLoadSample = () => {
+                setInputSchema(sampleInputSchema);
+                setOutputSchema(sampleOutputSchema);
+                setInputFields(extractFieldsFromJSON(sampleInputSchema));
+                setOutputFields(extractFieldsFromJSON(sampleOutputSchema));
+                setTemplateContent(sampleTemplate);
+                parseTemplate(sampleTemplate);
+                setSchemaFormat({ input: 'json', output: 'json' });
+            };
+
+            const updateMapping = (index, field, value) => {
+                const newMappings = [...mappings];
+                newMappings[index][field] = value;
+                setMappings(newMappings);
+            };
+
+            const addNewMapping = () => {
+                const newMapping = {
+                    id: Date.now(),
+                    target: '',
+                    source: '',
+                    sources: [],
+                    transformation: 'direct',
+                    condition: '',
+                    description: '',
+                    isNew: true
+                };
+                setMappings([...mappings, newMapping]);
+            };
+
+            const deleteMapping = (index) => {
+                const newMappings = mappings.filter((_, i) => i !== index);
+                setMappings(newMappings);
+            };
+
+            const autoMapFields = () => {
+                const newMappings = [];
+                
+                outputFields.forEach(outputField => {
+                    if (outputField.type === 'object') return;
+                    
+                    // Try exact match first
+                    const exactMatch = inputFields.find(f => 
+                        f.path.toLowerCase() === outputField.path.toLowerCase()
+                    );
+                    
+                    if (exactMatch) {
+                        newMappings.push({
+                            id: Date.now() + Math.random(),
+                            target: outputField.path,
+                            source: exactMatch.path,
+                            sources: [exactMatch.path],
+                            transformation: 'direct',
+                            condition: '',
+                            description: 'Auto-mapped (exact match)',
+                            isNew: false
+                        });
+                        return;
+                    }
+                    
+                    // Try fuzzy match
+                    const fieldName = outputField.path.split('.').pop().toLowerCase();
+                    const fuzzyMatch = inputFields.find(f => {
+                        const inputFieldName = f.path.split('.').pop().toLowerCase();
+                        return inputFieldName.includes(fieldName) || fieldName.includes(inputFieldName);
+                    });
+                    
+                    if (fuzzyMatch) {
+                        newMappings.push({
+                            id: Date.now() + Math.random(),
+                            target: outputField.path,
+                            source: fuzzyMatch.path,
+                            sources: [fuzzyMatch.path],
+                            transformation: 'direct',
+                            condition: '',
+                            description: 'Auto-mapped (fuzzy match)',
+                            isNew: false
+                        });
+                    }
+                });
+                
+                setMappings(newMappings);
+                setOriginalMappings(JSON.parse(JSON.stringify(newMappings)));
+            };
+
+            const getChanges = () => {
+                const changes = {
+                    modified: [],
+                    added: [],
+                    deleted: []
+                };
+
+                mappings.forEach(mapping => {
+                    if (mapping.isNew) {
+                        changes.added.push(mapping);
+                    } else {
+                        const original = originalMappings.find(m => m.id === mapping.id);
+                        if (original && (original.target !== mapping.target || original.source !== mapping.source)) {
+                            changes.modified.push({
+                                original,
+                                updated: mapping
+                            });
+                        }
+                    }
+                });
+
+                originalMappings.forEach(original => {
+                    if (!mappings.find(m => m.id === original.id)) {
+                        changes.deleted.push(original);
+                    }
+                });
+
+                return changes;
+            };
+
+            const generateV2Template = () => {
+                let template = '{\n';
+                
+                mappings.forEach((mapping, index) => {
+                    const indent = '  ';
+                    const isLast = index === mappings.length - 1;
+                    
+                    if (mapping.transformation === 'direct') {
+                        template += `${indent}"${mapping.target}": "\${${mapping.source}}"${isLast ? '' : ','}\n`;
+                    } else if (mapping.transformation === 'concatenate') {
+                        const concatenated = mapping.sources.map(s => `\${${s}}`).join(' ');
+                        template += `${indent}"${mapping.target}": "${concatenated}"${isLast ? '' : ','}\n`;
+                    } else if (mapping.transformation === 'conditional') {
+                        const condition = mapping.condition || `${mapping.source}??`;
+                        template += `${indent}"${mapping.target}": "<#if ${condition}>\${${mapping.source}}<#else>N/A</#if>"${isLast ? '' : ','}\n`;
+                    } else if (mapping.transformation === 'custom') {
+                        template += `${indent}"${mapping.target}": "\${${mapping.source}}"${isLast ? '' : ','}\n`;
+                    }
+                });
+                
+                template += '}';
+                return template;
+            };
+
+            const downloadTemplate = () => {
+                const v2Template = generateV2Template();
+                const blob = new Blob([v2Template], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'transform-v2.ftl';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // Step 1: Upload Schemas and Template
+            const Step1 = () => (
+                <div className="bg-white rounded-lg shadow-lg p-8 max-w-6xl mx-auto">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-6">Step 1: Upload Schemas & Template</h2>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        {/* Input Schema */}
+                        <div className="dropzone rounded-lg p-6">
+                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                1. Input Schema
+                            </h3>
+                            <input
+                                type="file"
+                                accept=".json,.xml"
+                                onChange={(e) => e.target.files[0] && handleFileUpload('input-schema', e.target.files[0])}
+                                className="hidden"
+                                id="input-schema-upload"
+                            />
+                            <label htmlFor="input-schema-upload" className="cursor-pointer block text-center p-4 bg-blue-50 rounded border-2 border-dashed border-blue-300 hover:bg-blue-100">
+                                <div className="text-sm text-gray-600">
+                                    {inputSchema ? '✓ Loaded' : 'Upload JSON/XML'}
+                                </div>
+                            </label>
+                            {inputSchema && (
+                                <div className="mt-2 text-xs text-green-600 font-semibold">
+                                    {inputFields.length} fields found
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Output Schema */}
+                        <div className="dropzone rounded-lg p-6">
+                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                2. Output Schema
+                            </h3>
+                            <input
+                                type="file"
+                                accept=".json,.xml"
+                                onChange={(e) => e.target.files[0] && handleFileUpload('output-schema', e.target.files[0])}
+                                className="hidden"
+                                id="output-schema-upload"
+                            />
+                            <label htmlFor="output-schema-upload" className="cursor-pointer block text-center p-4 bg-green-50 rounded border-2 border-dashed border-green-300 hover:bg-green-100">
+                                <div className="text-sm text-gray-600">
+                                    {outputSchema ? '✓ Loaded' : 'Upload JSON/XML'}
+                                </div>
+                            </label>
+                            {outputSchema && (
+                                <div className="mt-2 text-xs text-green-600 font-semibold">
+                                    {outputFields.length} fields found
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Template (Optional) */}
+                        <div className="dropzone rounded-lg p-6">
+                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                </svg>
+                                3. Template (Optional)
+                            </h3>
+                            <input
+                                type="file"
+                                accept=".ftl"
+                                onChange={(e) => e.target.files[0] && handleFileUpload('template', e.target.files[0])}
+                                className="hidden"
+                                id="template-upload"
+                            />
+                            <label htmlFor="template-upload" className="cursor-pointer block text-center p-4 bg-purple-50 rounded border-2 border-dashed border-purple-300 hover:bg-purple-100">
+                                <div className="text-sm text-gray-600">
+                                    {templateContent ? '✓ Loaded' : 'Upload .ftl'}
+                                </div>
+                            </label>
+                            {templateContent && (
+                                <div className="mt-2 text-xs text-purple-600 font-semibold">
+                                    Template loaded
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="text-center mb-6">
+                        <button
+                            onClick={handleLoadSample}
+                            className="inline-flex items-center px-6 py-3 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                        >
+                            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            Load Sample Data
+                        </button>
+                    </div>
+
+                    {inputSchema && outputSchema && (
+                        <div className="grid grid-cols-2 gap-6">
+                            {/* Input Schema Preview */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-700 mb-2">Input Fields ({inputFields.length})</h3>
+                                <div className="bg-gray-50 border border-gray-200 rounded p-4 max-h-96 overflow-y-auto custom-scrollbar">
+                                    {inputFields.map((field, idx) => (
+                                        <div key={idx} className={`text-sm py-1 ${field.isNested ? 'ml-4 text-gray-600' : 'font-medium text-gray-800'}`}>
+                                            {field.path} <span className="text-gray-400">({field.type})</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Output Schema Preview */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-700 mb-2">Output Fields ({outputFields.length})</h3>
+                                <div className="bg-gray-50 border border-gray-200 rounded p-4 max-h-96 overflow-y-auto custom-scrollbar">
+                                    {outputFields.map((field, idx) => (
+                                        <div key={idx} className={`text-sm py-1 ${field.isNested ? 'ml-4 text-gray-600' : 'font-medium text-gray-800'}`}>
+                                            {field.path} <span className="text-gray-400">({field.type})</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {inputSchema && outputSchema && (
+                        <div className="mt-6 flex gap-4 justify-end">
+                            <button
+                                onClick={autoMapFields}
+                                className="bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 font-semibold flex items-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                Auto-Map Fields
+                            </button>
+                            <button
+                                onClick={() => setStep(2)}
+                                className="bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 font-semibold"
+                            >
+                                Next: Edit Mappings →
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+
+            // Step 2: Edit Mappings (Enhanced with field browser)
+            const Step2 = () => {
+                const [selectedMapping, setSelectedMapping] = useState(null);
+                const [fieldBrowserMode, setFieldBrowserMode] = useState(null); // 'source' or 'target'
+
+                const selectField = (field, mappingIndex, type) => {
+                    const newMappings = [...mappings];
+                    if (type === 'source') {
+                        newMappings[mappingIndex].source = field.path;
+                        newMappings[mappingIndex].sources = [field.path];
+                    } else {
+                        newMappings[mappingIndex].target = field.path;
+                    }
+                    setMappings(newMappings);
+                    setFieldBrowserMode(null);
+                };
+
+                return (
+                    <div className="bg-white rounded-lg shadow-lg p-8 max-w-7xl mx-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold text-gray-800">Step 2: Edit Field Mappings</h2>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={addNewMapping}
+                                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    Add Mapping
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-6">
+                            {/* Mappings Table */}
+                            <div className="flex-1 overflow-x-auto custom-scrollbar">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Target</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {mappings.map((mapping, index) => (
+                                            <tr key={mapping.id} className={`mapping-row ${mapping.isNew ? 'bg-green-50' : ''}`}>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex gap-1">
+                                                        <input
+                                                            type="text"
+                                                            value={mapping.target}
+                                                            onChange={(e) => updateMapping(index, 'target', e.target.value)}
+                                                            className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                                                            placeholder="Select or type..."
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedMapping(index);
+                                                                setFieldBrowserMode('target');
+                                                            }}
+                                                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                                                            title="Browse output fields"
+                                                        >
+                                                            📋
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex gap-1">
+                                                        <input
+                                                            type="text"
+                                                            value={mapping.source}
+                                                            onChange={(e) => updateMapping(index, 'source', e.target.value)}
+                                                            className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                                                            placeholder="Select or type..."
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedMapping(index);
+                                                                setFieldBrowserMode('source');
+                                                            }}
+                                                            className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                                                            title="Browse input fields"
+                                                        >
+                                                            📋
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <select
+                                                        value={mapping.transformation}
+                                                        onChange={(e) => updateMapping(index, 'transformation', e.target.value)}
+                                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500"
+                                                    >
+                                                        <option value="direct">Direct</option>
+                                                        <option value="concatenate">Concatenate</option>
+                                                        <option value="conditional">Conditional</option>
+                                                        <option value="custom">Custom</option>
+                                                    </select>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        onClick={() => deleteMapping(index)}
+                                                        className="text-red-600 hover:text-red-800"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Field Browser Sidebar */}
+                            {fieldBrowserMode && (
+                                <div className="w-80 bg-gray-50 border-l border-gray-200 p-4 max-h-[600px] overflow-y-auto custom-scrollbar">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="font-semibold text-gray-700">
+                                            {fieldBrowserMode === 'source' ? 'Input Fields' : 'Output Fields'}
+                                        </h3>
+                                        <button
+                                            onClick={() => setFieldBrowserMode(null)}
+                                            className="text-gray-500 hover:text-gray-700"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                    <div className="space-y-1">
+                                        {(fieldBrowserMode === 'source' ? inputFields : outputFields)
+                                            .filter(f => f.type !== 'object')
+                                            .map((field, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    onClick={() => selectField(field, selectedMapping, fieldBrowserMode)}
+                                                    className={`field-item px-3 py-2 rounded cursor-pointer ${
+                                                        field.isNested ? 'ml-4 bg-white' : 'bg-blue-50'
+                                                    }`}
+                                                >
+                                                    <div className="text-sm font-medium text-gray-800">{field.path}</div>
+                                                    <div className="text-xs text-gray-500">{field.type}</div>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-6 flex justify-between">
+                            <button
+                                onClick={() => setStep(1)}
+                                className="bg-gray-200 text-gray-700 py-3 px-6 rounded-lg hover:bg-gray-300 font-semibold"
+                            >
+                                ← Back
+                            </button>
+                            <button
+                                onClick={() => setStep(3)}
+                                className="bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 font-semibold"
+                            >
+                                Next: Review Changes →
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            // Step 3: Review (same as before but enhanced)
+            const Step3 = () => {
+                const changes = getChanges();
+                const v2Template = generateV2Template();
+
+                return (
+                    <div className="bg-white rounded-lg shadow-lg p-8 max-w-6xl mx-auto">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-6">Step 3: Review & Generate</h2>
+
+                        <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                <div className="text-2xl font-bold text-green-700">{changes.added.length}</div>
+                                <div className="text-sm text-green-600">New Mappings</div>
+                            </div>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                <div className="text-2xl font-bold text-amber-700">{changes.modified.length}</div>
+                                <div className="text-sm text-amber-600">Modified</div>
+                            </div>
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <div className="text-2xl font-bold text-blue-700">{mappings.length}</div>
+                                <div className="text-sm text-blue-600">Total Mappings</div>
+                            </div>
+                        </div>
+
+                        <div className="mb-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">Generated V2 Template:</h3>
+                            <pre className="bg-gray-900 text-green-400 border border-gray-700 rounded p-4 text-sm overflow-x-auto custom-scrollbar max-h-96">
+{v2Template}
+                            </pre>
+                        </div>
+
+                        <div className="mt-6 flex justify-between">
+                            <button
+                                onClick={() => setStep(2)}
+                                className="bg-gray-200 text-gray-700 py-3 px-6 rounded-lg hover:bg-gray-300 font-semibold"
+                            >
+                                ← Back to Edit
+                            </button>
+                            <button
+                                onClick={downloadTemplate}
+                                className="bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 font-semibold flex items-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Download V2 Template
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+                    <div className="max-w-7xl mx-auto mb-8">
+                        <h1 className="text-4xl font-bold text-gray-800 mb-2">FreeMarker Schema Mapping Editor</h1>
+                        <p className="text-gray-600">Upload schemas (JSON/XML) and visually map fields</p>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto mb-8">
+                        <div className="flex items-center justify-center">
+                            {[1, 2, 3].map((stepNum) => (
+                                <React.Fragment key={stepNum}>
+                                    <div className="flex items-center">
+                                        <div className={`flex items-center justify-center w-10 h-10 rounded-full ${step >= stepNum ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'} font-semibold`}>
+                                            {stepNum}
+                                        </div>
+                                        <div className={`ml-2 text-sm font-medium ${step >= stepNum ? 'text-blue-600' : 'text-gray-500'}`}>
+                                            {stepNum === 1 ? 'Upload' : stepNum === 2 ? 'Map' : 'Generate'}
+                                        </div>
+                                    </div>
+                                    {stepNum < 3 && (
+                                        <div className={`w-24 h-1 mx-4 ${step > stepNum ? 'bg-blue-600' : 'bg-gray-300'}`}></div>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </div>
+                    </div>
+
+                    {step === 1 && <Step1 />}
+                    {step === 2 && <Step2 />}
+                    {step === 3 && <Step3 />}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<SchemaMapper />, document.getElementById('root'));
+    </script>
+</body>
+</html>
