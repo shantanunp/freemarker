@@ -32,9 +32,11 @@ my-mapper/
 ## Configuration
 ### Update src/index.css
 ```css
-@import "tailwindcss";
-/* Optional: Add the fonts used in the Mapper code */
+/* ✅ Fonts first */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ✅ Tailwind second */
+@import "tailwindcss";
 ```
 ### Update src/App.jsx
 ```jsx
