@@ -1,0 +1,55 @@
+{
+  "clientReference": "CUST-12345",
+  "profile": {
+    "fullName": "John Doe",
+    "contact": {
+      "primaryEmail": "john.doe@example.com",
+      "mobile": "+1-555-123-4567"
+    },
+    "dob": "1985-06-15"
+  },
+  "financialAccounts": [
+    {
+      "accountId": "ACC-001",
+      "type": "SAVINGS",
+      "currentBalance": {
+        "amount": 15000.5,
+        "currencyCode": "USD"
+      },
+      "isActive": true
+    },
+    {
+      "accountId": "ACC-002",
+      "type": "CHECKING",
+      "currentBalance": {
+        "amount": 3250.75,
+        "currencyCode": "USD"
+      },
+      "isActive": true
+    },
+    {
+      "accountId": "ACC-003",
+      "type": "INVESTMENT",
+      "currentBalance": {
+        "amount": 50000,
+        "currencyCode": "USD"
+      },
+      "isActive": false
+    }
+  ],
+  "totalBalance": {
+    "amount": 68251.25,
+    "currency": "USD"
+  },
+  "notifications": {
+    "channels": [
+      "EMAIL",
+      "SMS"
+    ],
+    "locale": "en-US"
+  },
+  "metadata": {
+    "transformedAt": "2026-01-28T01:20:49Z",
+    "accountCount": 3
+  }
+}
